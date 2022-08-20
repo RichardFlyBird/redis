@@ -687,10 +687,13 @@ int rdbSave(char *filename) {
      * loading code skips the check in this case. */
     cksum = rdb.cksum;
     memrev64ifbe(&cksum);
+    //1、将数据写入glibc的缓冲区
     rioWrite(&rdb,&cksum,8);
 
     /* Make sure data will not remain on the OS's output buffers */
+    //2、将数据从glibc的缓冲区 -> 写入内核的page/cache buffer中
     fflush(fp);
+    //3、将数据从内核的page/cache buffer -> 写入磁盘
     fsync(fileno(fp));
     fclose(fp);
 
