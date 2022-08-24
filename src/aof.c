@@ -310,6 +310,7 @@ void flushAppendOnlyFile(int force) {
     if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
         /* aof_fsync is defined as fdatasync() for Linux in order to avoid
          * flushing metadata. */
+        //aof_fsync 对应linux中的fdatasync()，因为redis的aof只需要一直append数据到inode中，而无需关注inode的元数据。这样效率更高
         aof_fsync(server.aof_fd); /* Let's try to get this data on the disk */
         server.aof_last_fsync = server.unixtime;
     } else if ((server.aof_fsync == AOF_FSYNC_EVERYSEC &&

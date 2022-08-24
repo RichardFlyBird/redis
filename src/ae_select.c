@@ -74,6 +74,8 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     memcpy(&state->_rfds,&state->rfds,sizeof(fd_set));
     memcpy(&state->_wfds,&state->wfds,sizeof(fd_set));
 
+    //调用select系统调用，并且阻塞tvp时间，然后遍历传入的fd，找到哪些fd是可读的，哪些fd是可写的，
+    // 放到eventLoop->fired[numevents]中，然后用户进程就知道哪些df可读，哪些fd可写了。
     retval = select(eventLoop->maxfd+1,
                 &state->_rfds,&state->_wfds,NULL,tvp);
     if (retval > 0) {
@@ -86,6 +88,7 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
                 mask |= AE_READABLE;
             if (fe->mask & AE_WRITABLE && FD_ISSET(j,&state->_wfds))
                 mask |= AE_WRITABLE;
+            //将可读可写的fd，放到eventLoop->fired[numevents]中
             eventLoop->fired[numevents].fd = j;
             eventLoop->fired[numevents].mask = mask;
             numevents++;
