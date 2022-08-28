@@ -78,6 +78,9 @@ static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     // 放到eventLoop->fired[numevents]中，然后用户进程就知道哪些df可读，哪些fd可写了。
     retval = select(eventLoop->maxfd+1,
                 &state->_rfds,&state->_wfds,NULL,tvp);
+
+    // 系统调用sys_select很狗，若一堆fd有读/写发生，则只是返回 >0的数，但是不知道哪个fd发生了读/写。
+    // 所以客户端还得自己判断若retval>0，则遍历所有传入的fd，逐个判断每个fd的读/写状态位，然后再针对具体fd对应的file执行具体读或写函数
     if (retval > 0) {
         for (j = 0; j <= eventLoop->maxfd; j++) {
             int mask = 0;
