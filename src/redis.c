@@ -1414,6 +1414,7 @@ void initServer() {
 
     createSharedObjects();
     adjustOpenFilesLimit();
+    //创建epoll_fd
     server.el = aeCreateEventLoop(server.maxclients+1024);
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
@@ -1477,6 +1478,7 @@ void initServer() {
     server.unixtime = time(NULL);
     server.mstime = mstime();
     server.lastbgsave_status = REDIS_OK;
+    //
     if(aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         redisPanic("create time event failed");
         exit(1);
