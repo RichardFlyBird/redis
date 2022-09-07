@@ -1327,6 +1327,7 @@ void initServerConfig() {
     /* Command table -- we initiialize it here as it is part of the
      * initial configuration, since command names may be changed via
      * redis.conf using the rename-command directive. */
+    //初始化redis命令表
     server.commands = dictCreate(&commandTableDictType,NULL);
     server.orig_commands = dictCreate(&commandTableDictType,NULL);
     populateCommandTable();
@@ -1414,7 +1415,7 @@ void initServer() {
 
     createSharedObjects();
     adjustOpenFilesLimit();
-    //创建epoll_fd
+    //1、创建epoll_fd
     server.el = aeCreateEventLoop(server.maxclients+1024);
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
@@ -1478,11 +1479,12 @@ void initServer() {
     server.unixtime = time(NULL);
     server.mstime = mstime();
     server.lastbgsave_status = REDIS_OK;
-    //
+    //2、创建一个时间Event，挂在eventLoop的timeEventHead链表上（tips：这不是fd，只是一个时间到期后的执行回调的timer）
     if(aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         redisPanic("create time event failed");
         exit(1);
     }
+    //3、创建server socket fd，关注读取客户端连接的事件（即该fd是用于接受客户端连接）
     if (server.ipfd > 0 && aeCreateFileEvent(server.el,server.ipfd,AE_READABLE,
         acceptTcpHandler,NULL) == AE_ERR) redisPanic("Unrecoverable error creating server.ipfd file event.");
     if (server.sofd > 0 && aeCreateFileEvent(server.el,server.sofd,AE_READABLE,
@@ -1670,6 +1672,7 @@ void call(redisClient *c, int flags) {
     /* Call the command. */
     redisOpArrayInit(&server.also_propagate);
     dirty = server.dirty;
+    //调用proc函数指针，来执行具体命令上设置的函数
     c->cmd->proc(c);
     dirty = server.dirty-dirty;
     duration = ustime()-start;
@@ -1736,6 +1739,7 @@ int processCommand(redisClient *c) {
 
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
+    //查找命令
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
     if (!c->cmd) {
         flagTransaction(c);
@@ -1845,6 +1849,7 @@ int processCommand(redisClient *c) {
         queueMultiCommand(c);
         addReply(c,shared.queued);
     } else {
+        //执行命令
         call(c,REDIS_CALL_FULL);
         if (listLength(server.ready_keys))
             handleClientsBlockedOnLists();
@@ -2712,6 +2717,7 @@ int main(int argc, char **argv) {
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
     server.sentinel_mode = checkForSentinelMode(argc,argv);
+    //1、初始化server配置，包括redis的命令表
     initServerConfig();
 
     /* We need to init sentinel right now as parsing the configuration file
@@ -2770,6 +2776,10 @@ int main(int argc, char **argv) {
         redisLog(REDIS_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf", argv[0], server.sentinel_mode ? "sentinel" : "redis");
     }
     if (server.daemonize) daemonize();
+    //2、初始化server服务，
+    //  2.1 包括创建eventLoop
+    //  2.2 创建timer，绑定到eventLoop的timer链表
+    //  2.3 创建server socket fd,绑定到eventLoop事件链表
     initServer();
     if (server.daemonize) createPidFile();
     redisAsciiArt();

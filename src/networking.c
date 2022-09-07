@@ -57,10 +57,13 @@ redisClient *createClient(int fd) {
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
     if (fd != -1) {
+        //将客户端fd设置成非阻塞
         anetNonBlock(NULL,fd);
         anetEnableTcpNoDelay(NULL,fd);
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
+        //又看到熟悉的aeCreateFileEvent()方法。该方法在创建server socket fd时就是用的这个方法。
+        //同理这里是将客户端fd绑定到全局唯一的eventLoop中。
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,
             readQueryFromClient, c) == AE_ERR)
         {
@@ -128,6 +131,8 @@ int prepareClientToWrite(redisClient *c) {
     if (c->bufpos == 0 && listLength(c->reply) == 0 &&
         (c->replstate == REDIS_REPL_NONE ||
          c->replstate == REDIS_REPL_ONLINE) &&
+         //创建一个写事件的fd，注册到eventLoop上（写事件的fd：指的是从server -> client的写数据流程）。
+         //（sendReplyToClient()方法写的过程肯定也是放到一个写队列中，然后选择一个倒霉蛋进程去处理这个req队列...写每一个req到socket的buf中...然后是网络协议栈一层层出去）
         aeCreateFileEvent(server.el, c->fd, AE_WRITABLE,
         sendReplyToClient, c) == AE_ERR) return REDIS_ERR;
     return REDIS_OK;
@@ -269,6 +274,11 @@ void _addReplyStringToList(redisClient *c, char *s, size_t len) {
  * -------------------------------------------------------------------------- */
 
 void addReply(redisClient *c, robj *obj) {
+    //这个方法非常重要，且在下面的_addReplyToBuffer之前执行。这里是向全局eventLoop中注册一个写事件的fd。
+    // 该fd是如何使用的？
+    //   1、当该redisClient对应的tcp连接的buf中可以写入数据时，就会触发这个新注册的写事件fd。具体怎么触发的呢？肯定是当socket的buf中的数据被刷出(即为NULL了)，则会回调一个方法，这个方法就将该fd放在eventLoop中的read链表中，等着下次调用sys_epoll_wait时返回。
+    //   2、然后应用程序调用 sys_epoll_wait，返回可用事件的fd（包括该写事件的fd）
+    //   3、然后找到可用fd上的函数指针，即应用程序每一次aeCreateFileEvent()传入的回调函数。如这里的sendReplyToClient()。
     if (prepareClientToWrite(c) != REDIS_OK) return;
 
     /* This is an important place where we can avoid copy-on-write
@@ -296,6 +306,7 @@ void addReply(redisClient *c, robj *obj) {
              * happen actually since we verified there is room. */
         }
         obj = getDecodedObject(obj);
+        //将obj上获取到的数据添加到 redisClient的写缓冲区（最大16kb）中
         if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != REDIS_OK)
             _addReplyObjectToList(c,obj);
         decrRefCount(obj);
@@ -519,6 +530,7 @@ void copyClientOutputBuffer(redisClient *dst, redisClient *src) {
 
 static void acceptCommonHandler(int fd, int flags) {
     redisClient *c;
+    //将客户端请求的fd，包装成一个redisClient对象
     if ((c = createClient(fd)) == NULL) {
         redisLog(REDIS_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
@@ -545,6 +557,7 @@ static void acceptCommonHandler(int fd, int flags) {
     c->flags |= flags;
 }
 
+//接受到客户端请求的fd，并将该fd反向注册到全局唯一的eventLoop中
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd;
     char cip[128];
@@ -552,6 +565,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     REDIS_NOTUSED(mask);
     REDIS_NOTUSED(privdata);
 
+    //cfd为redis server接收到的客户端请求的fd
     cfd = anetTcpAccept(server.neterr, fd, cip, &cport);
     if (cfd == AE_ERR) {
         redisLog(REDIS_WARNING,"Accepting client connection: %s", server.neterr);
@@ -712,6 +726,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
                 /* Don't reply to a master */
                 nwritten = c->bufpos - c->sentlen;
             } else {
+                //将redisClient中buf中的数据写到socket的buf种......最终肯定是走网络协议栈...到网卡驱动了
                 nwritten = write(fd,c->buf+c->sentlen,c->bufpos-c->sentlen);
                 if (nwritten <= 0) break;
             }
@@ -776,6 +791,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (totwritten > 0) c->lastinteraction = server.unixtime;
     if (c->bufpos == 0 && listLength(c->reply) == 0) {
         c->sentlen = 0;
+        //删除之前注册的write fd
         aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
 
         /* Close connection after entire reply has been sent. */
@@ -1046,6 +1062,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
     c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
+    //1、将客户端发来的请求数据设置到c->querybuf上，比如get(key)、multiGet()等
     nread = read(fd, c->querybuf+qblen, readlen);
     if (nread == -1) {
         if (errno == EAGAIN) {
@@ -1077,6 +1094,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         freeClient(c);
         return;
     }
+    //2、解析redisClient中刚才querybuf上设置好的请求数据，并且解析出命令部分+数据部分。然后通过服务启动就初始化好的命令表找到 对应的命令，然后执行
     processInputBuffer(c);
     server.current_client = NULL;
 }

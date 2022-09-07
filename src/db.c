@@ -73,6 +73,7 @@ robj *lookupKeyWrite(redisDb *db, robj *key) {
 }
 
 robj *lookupKeyReadOrReply(redisClient *c, robj *key, robj *reply) {
+    //robj对象上存储了：key的类型 + 数据
     robj *o = lookupKeyRead(c->db, key);
     if (!o) addReply(c,reply);
     return o;
@@ -520,11 +521,13 @@ int expireIfNeeded(redisDb *db, robj *key) {
     }
 
     /* Return when this key has not expired */
+    //1、没有过期，则直接返回
     if (mstime() <= when) return 0;
 
     /* Delete the key */
     server.stat_expiredkeys++;
     propagateExpire(db,key);
+    //2、若过期，则直接删除
     return dbDelete(db,key);
 }
 
