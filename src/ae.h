@@ -59,10 +59,11 @@ typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientDat
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure */
+//根据mask标志符（read/write），来决定到底回调rfileProc/wfileProc哪一个
 typedef struct aeFileEvent {
     int mask; /* one of AE_(READABLE|WRITABLE) */
-    aeFileProc *rfileProc;
-    aeFileProc *wfileProc;
+    aeFileProc *rfileProc; //read回调函数
+    aeFileProc *wfileProc; //write回调函数
     void *clientData;
 } aeFileEvent;
 
@@ -93,6 +94,7 @@ typedef struct aeEventLoop {
     aeFiredEvent *fired; /* Fired events */
     aeTimeEvent *timeEventHead;
     int stop;
+    // apidata作为万能指针，相当于接口。可以指向epoll、select、kqueue等不同操作系统的不同多路复用器
     void *apidata; /* This is used for polling API specific data */
     aeBeforeSleepProc *beforesleep;
 } aeEventLoop;

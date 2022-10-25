@@ -75,6 +75,8 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     eventLoop->stop = 0;
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
+    //aeApiCreate算是个抽象接口，是对epoll、select、kqueue等具体多路复用器的抽象
+    //ae_epoll.c、ae_evport.c、ae_kqueue.c、ae_select.c中均有aeApiCreate()方法的具体实现
     if (aeApiCreate(eventLoop) == -1) goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
@@ -367,6 +369,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             }
         }
 
+        //aeApiPoll也是个接口层。对应linux中为sys_epoll_wait，获取准备好事件的fds
         numevents = aeApiPoll(eventLoop, tvp);
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
@@ -379,10 +382,12 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * processed, so we check if the event is still valid. */
             if (fe->mask & mask & AE_READABLE) {
                 rfired = 1;
+                //若是read类型，则调用rfileProc
                 fe->rfileProc(eventLoop,fd,fe->clientData,mask);
             }
             if (fe->mask & mask & AE_WRITABLE) {
                 if (!rfired || fe->wfileProc != fe->rfileProc)
+                    //若是write类型，则调用wfileProc
                     fe->wfileProc(eventLoop,fd,fe->clientData,mask);
             }
             processed++;

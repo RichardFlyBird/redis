@@ -1478,11 +1478,15 @@ void initServer() {
     server.unixtime = time(NULL);
     server.mstime = mstime();
     server.lastbgsave_status = REDIS_OK;
-    //
+    //1、创建一个定时任务entry，挂在eventLoop的aeTimeEvent链表上
     if(aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         redisPanic("create time event failed");
         exit(1);
     }
+
+    //2、创建一个接受tcp氢气的server socket fd，挂在eventLoop的aeFileEvent链表上。
+    // 2.1、并且调用epoll_ctl将server.ipfd 注册到eventLoop->apidata->epoll_fd上。
+    // 2.2、同时在注册server.ipfd时，传递一个回调函数acceptTcpHandler，当有tcp连接三次握手后，就调用acceptTcpHandler 接受tcp请求。
     if (server.ipfd > 0 && aeCreateFileEvent(server.el,server.ipfd,AE_READABLE,
         acceptTcpHandler,NULL) == AE_ERR) redisPanic("Unrecoverable error creating server.ipfd file event.");
     if (server.sofd > 0 && aeCreateFileEvent(server.el,server.sofd,AE_READABLE,
@@ -1670,6 +1674,7 @@ void call(redisClient *c, int flags) {
     /* Call the command. */
     redisOpArrayInit(&server.also_propagate);
     dirty = server.dirty;
+    //执行命令对应的函数
     c->cmd->proc(c);
     dirty = server.dirty-dirty;
     duration = ustime()-start;
@@ -1736,6 +1741,7 @@ int processCommand(redisClient *c) {
 
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
+    //从初始化好的命令dict中查找到key对应的 具体命令
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
     if (!c->cmd) {
         flagTransaction(c);
@@ -1845,6 +1851,7 @@ int processCommand(redisClient *c) {
         queueMultiCommand(c);
         addReply(c,shared.queued);
     } else {
+        //执行命令
         call(c,REDIS_CALL_FULL);
         if (listLength(server.ready_keys))
             handleClientsBlockedOnLists();
@@ -2712,6 +2719,7 @@ int main(int argc, char **argv) {
     gettimeofday(&tv,NULL);
     dictSetHashFunctionSeed(tv.tv_sec^tv.tv_usec^getpid());
     server.sentinel_mode = checkForSentinelMode(argc,argv);
+    //1、初始化server配置
     initServerConfig();
 
     /* We need to init sentinel right now as parsing the configuration file
@@ -2770,6 +2778,9 @@ int main(int argc, char **argv) {
         redisLog(REDIS_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf", argv[0], server.sentinel_mode ? "sentinel" : "redis");
     }
     if (server.daemonize) daemonize();
+    //2、初始化server
+    // 2.1、创建一个epoll_fd(抽象为eventLoop)
+    // 2.2、然后再创建一个server socket fd，并将server socket fd注册到epoll_fd上
     initServer();
     if (server.daemonize) createPidFile();
     redisAsciiArt();

@@ -392,6 +392,7 @@ int anetTcpAccept(char *err, int s, char *ip, int *port) {
     int fd;
     struct sockaddr_in sa;
     socklen_t salen = sizeof(sa);
+    //anetGenericAccept接受客户端请求，属于网络编程的范畴。
     if ((fd = anetGenericAccept(err,s,(struct sockaddr*)&sa,&salen)) == ANET_ERR)
         return ANET_ERR;
 

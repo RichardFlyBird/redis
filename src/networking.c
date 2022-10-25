@@ -57,10 +57,13 @@ redisClient *createClient(int fd) {
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
     if (fd != -1) {
+        //设置cfd为非阻塞
         anetNonBlock(NULL,fd);
         anetEnableTcpNoDelay(NULL,fd);
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
+        //调用sys_epoll_wait将fd注册到 server.el上，且事件类型为AE_READABLE。
+        //使用场景：当客户端发送来请求，如get(key)时，则server.el会取出该fd，然后调用回调函数readQueryFromClient，处理这个请求。
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,
             readQueryFromClient, c) == AE_ERR)
         {
@@ -519,6 +522,7 @@ void copyClientOutputBuffer(redisClient *dst, redisClient *src) {
 
 static void acceptCommonHandler(int fd, int flags) {
     redisClient *c;
+//    redisClient是对客户端cfd的一个包装，1：1关系。
     if ((c = createClient(fd)) == NULL) {
         redisLog(REDIS_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
@@ -552,12 +556,15 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     REDIS_NOTUSED(mask);
     REDIS_NOTUSED(privdata);
 
+    //cfd是客户端fd
     cfd = anetTcpAccept(server.neterr, fd, cip, &cport);
     if (cfd == AE_ERR) {
         redisLog(REDIS_WARNING,"Accepting client connection: %s", server.neterr);
         return;
     }
     redisLog(REDIS_VERBOSE,"Accepted %s:%d", cip, cport);
+    //将客户端连接的fd，即cfd反注册到eventLoop上（即redis server仅有的一个epoll_fd上）
+    //即每当接受到新的请求，就将该客户端的请求注册到epoll_fd上。
     acceptCommonHandler(cfd,0);
 }
 
@@ -1014,12 +1021,14 @@ void processInputBuffer(redisClient *c) {
             resetClient(c);
         } else {
             /* Only reset the client when the command was executed. */
+            //执行命令
             if (processCommand(c) == REDIS_OK)
                 resetClient(c);
         }
     }
 }
 
+//读取fd对应的数据（各种redis命令，如get、hget等命令+数据），然后CRUD
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     redisClient *c = (redisClient*) privdata;
     int nread, readlen;
@@ -1046,6 +1055,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
     c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
+    //读取fd的数据，并填充到c->querybuf中
     nread = read(fd, c->querybuf+qblen, readlen);
     if (nread == -1) {
         if (errno == EAGAIN) {
@@ -1077,6 +1087,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         freeClient(c);
         return;
     }
+    //解析c->querybuf中的数据结构，形成命令、数据分离的格式，然后调用具体的命令执行。
     processInputBuffer(c);
     server.current_client = NULL;
 }
