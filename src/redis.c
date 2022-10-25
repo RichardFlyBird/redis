@@ -1327,6 +1327,7 @@ void initServerConfig() {
     /* Command table -- we initiialize it here as it is part of the
      * initial configuration, since command names may be changed via
      * redis.conf using the rename-command directive. */
+    //初始化redis命令表
     server.commands = dictCreate(&commandTableDictType,NULL);
     server.orig_commands = dictCreate(&commandTableDictType,NULL);
     populateCommandTable();
@@ -1414,7 +1415,7 @@ void initServer() {
 
     createSharedObjects();
     adjustOpenFilesLimit();
-    //创建epoll_fd
+    //1、创建epoll_fd
     server.el = aeCreateEventLoop(server.maxclients+1024);
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
@@ -2778,9 +2779,10 @@ int main(int argc, char **argv) {
         redisLog(REDIS_WARNING, "Warning: no config file specified, using the default config. In order to specify a config file use %s /path/to/%s.conf", argv[0], server.sentinel_mode ? "sentinel" : "redis");
     }
     if (server.daemonize) daemonize();
-    //2、初始化server
-    // 2.1、创建一个epoll_fd(抽象为eventLoop)
-    // 2.2、然后再创建一个server socket fd，并将server socket fd注册到epoll_fd上
+    //2、初始化server服务，
+    //  2.1 包括创建eventLoop
+    //  2.2 创建timer，绑定到eventLoop的timer链表
+    //  2.3 创建server socket fd,绑定到eventLoop事件链表
     initServer();
     if (server.daemonize) createPidFile();
     redisAsciiArt();

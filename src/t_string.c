@@ -142,6 +142,7 @@ void psetexCommand(redisClient *c) {
 int getGenericCommand(redisClient *c) {
     robj *o;
 
+    //如果获取到数据，则直接返回REDIS_OK
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return REDIS_OK;
 

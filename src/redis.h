@@ -323,7 +323,7 @@ typedef struct redisObject {
     unsigned encoding:4;
     unsigned lru:22;        /* lru time (relative to server.lruclock) */
     int refcount;
-    void *ptr;
+    void *ptr; //使用万能指针存储数据，则可以解耦数据类型，即可以存储任意数据。最后只需要根据type + encoding来解析数据即可。
 } robj;
 
 /* Macro used to initialize a Redis object allocated on the stack.
